@@ -10,13 +10,28 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	"github.com/sirupsen/logrus"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
 // forwardToWebhook is a helper function to forward event to webhook url
-func forwardToWebhook(evt *events.Message) error {
+func forwardToWebhook(evt any) error {
 	logrus.Info("Forwarding event to webhook:", config.WhatsappWebhook)
-	payload, err := createPayload(evt)
+
+	var payload map[string]interface{}
+	var err error
+
+	switch e := evt.(type) {
+	case *events.Message:
+		payload, err = createPayload(e)
+	case *events.Receipt:
+		payload, err = createReceiptPayload(e)
+	case *events.Presence:
+		payload, err = createPresencePayload(e)
+	default:
+		return fmt.Errorf("unsupported event type: %T", evt)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -37,6 +52,7 @@ func createPayload(evt *events.Message) (map[string]interface{}, error) {
 	forwarded := buildForwarded(evt)
 
 	body := make(map[string]interface{})
+	body["event_type"] = "message"
 
 	if from := evt.Info.SourceString(); from != "" {
 		body["from"] = from
@@ -123,6 +139,39 @@ func createPayload(evt *events.Message) (map[string]interface{}, error) {
 			return nil, pkgError.WebhookError(fmt.Sprintf("Failed to download video: %v", err))
 		}
 		body["video"] = path
+	}
+
+	return body, nil
+}
+
+func createReceiptPayload(evt *events.Receipt) (map[string]any, error) {
+	body := make(map[string]any)
+	body["event_type"] = "receipt"
+	body["from"] = evt.SourceString()
+	body["timestamp"] = evt.Timestamp.Format(time.RFC3339)
+	body["message_ids"] = evt.MessageIDs
+
+	switch evt.Type {
+	case types.ReceiptTypeDelivered:
+		body["receipt_type"] = "delivered"
+	default:
+		body["receipt_type"] = evt.Type
+	}
+	return body, nil
+}
+
+func createPresencePayload(evt *events.Presence) (map[string]any, error) {
+	body := make(map[string]any)
+	body["event_type"] = "presence"
+	body["from"] = evt.From.String()
+	body["timestamp"] = time.Now().Format(time.RFC3339)
+	body["status"] = "online"
+
+	if evt.Unavailable {
+		body["status"] = "offline"
+		if !evt.LastSeen.IsZero() {
+			body["last_seen"] = evt.LastSeen.Format(time.RFC3339)
+		}
 	}
 
 	return body, nil

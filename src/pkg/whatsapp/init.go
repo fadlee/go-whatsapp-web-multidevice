@@ -182,6 +182,14 @@ func handler(rawEvt interface{}) {
 		} else if evt.Type == types.ReceiptTypeDelivered {
 			log.Infof("%s was delivered to %s at %s", evt.MessageIDs[0], evt.SourceString(), evt.Timestamp)
 		}
+
+		if len(config.WhatsappWebhook) > 0 {
+			go func(evt *events.Receipt) {
+				if err := forwardToWebhook(evt); err != nil {
+					logrus.Error("Failed forward to webhook: ", err)
+				}
+			}(evt)
+		}
 	case *events.Presence:
 		if evt.Unavailable {
 			if evt.LastSeen.IsZero() {
@@ -191,6 +199,14 @@ func handler(rawEvt interface{}) {
 			}
 		} else {
 			log.Infof("%s is now online", evt.From)
+		}
+
+		if len(config.WhatsappWebhook) > 0 {
+			go func(evt *events.Presence) {
+				if err := forwardToWebhook(evt); err != nil {
+					logrus.Error("Failed forward to webhook: ", err)
+				}
+			}(evt)
 		}
 	case *events.HistorySync:
 		id := atomic.AddInt32(&historySyncID, 1)
